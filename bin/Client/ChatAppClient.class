@@ -1,0 +1,240 @@
+// Source code is decompiled from a .class file using FernFlower decompiler (from Intellij IDEA).
+package Client;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.net.Socket;
+import java.security.KeyPair;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Scanner;
+import javax.crypto.SecretKey;
+
+public class ChatAppClient {
+   private static final Map<String, PublicKey> publicKeys = new HashMap();
+   private static PrivateKey privateKey;
+   private static String username;
+   private static PrintWriter out;
+
+   public ChatAppClient() {
+   }
+
+   public static void main(String[] args) {
+      try {
+         Throwable var1 = null;
+         Object var2 = null;
+
+         try {
+            Socket socket = new Socket("localhost", 9000);
+
+            try {
+               BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+
+               try {
+                  Scanner sc = new Scanner(System.in);
+
+                  try {
+                     out = new PrintWriter(socket.getOutputStream(), true);
+                     KeyPair keyPair = EncryptionUtils.generateRSAKeyPair();
+                     privateKey = keyPair.getPrivate();
+                     PublicKey myPublicKey = keyPair.getPublic();
+                     in.readLine();
+                     System.out.print("Enter your username: ");
+                     username = sc.nextLine();
+                     out.println(username);
+                     in.readLine();
+                     out.println(EncryptionUtils.publicKeyToString(myPublicKey));
+                     String keyBundleLine = in.readLine();
+                     if (keyBundleLine.startsWith("PUBLIC_KEYS ")) {
+                        String keyBundle = keyBundleLine.substring("PUBLIC_KEYS ".length());
+                        if (!keyBundle.isBlank()) {
+                           String[] var13;
+                           for(String entry : var13 = keyBundle.split(",")) {
+                              String[] kv = entry.split(":", 2);
+                              if (kv.length == 2) {
+                                 publicKeys.put(kv[0], EncryptionUtils.stringToPublicKey(kv[1]));
+                              }
+                           }
+                        }
+                     }
+
+                     publicKeys.put(username, myPublicKey);
+                     Thread receiver = new Thread(() -> {
+                        String line;
+                        try {
+                           while((line = in.readLine()) != null) {
+                              handleIncoming(line);
+                           }
+                        } catch (IOException var2) {
+                           System.out.println("\nDisconnected from server.");
+                        }
+
+                     });
+                     receiver.setDaemon(true);
+                     receiver.start();
+
+                     while(true) {
+                        System.out.print("> ");
+                        String input = sc.nextLine();
+                        if (input.startsWith("/msg ")) {
+                           sendPrivateMessage(input);
+                        } else if (input.startsWith("/")) {
+                           out.println(input);
+                        } else if (!input.isBlank()) {
+                           sendGroupMessage(input);
+                        }
+                     }
+                  } finally {
+                     if (sc != null) {
+                        sc.close();
+                     }
+
+                  }
+               } catch (Throwable var40) {
+                  if (var1 == null) {
+                     var1 = var40;
+                  } else if (var1 != var40) {
+                     var1.addSuppressed(var40);
+                  }
+
+                  if (in != null) {
+                     in.close();
+                  }
+
+                  throw var1;
+               }
+            } catch (Throwable var41) {
+               if (var1 == null) {
+                  var1 = var41;
+               } else if (var1 != var41) {
+                  var1.addSuppressed(var41);
+               }
+
+               if (socket != null) {
+                  socket.close();
+               }
+
+               throw var1;
+            }
+         } catch (Throwable var42) {
+            if (var1 == null) {
+               var1 = var42;
+            } else if (var1 != var42) {
+               var1.addSuppressed(var42);
+            }
+
+            throw var1;
+         }
+      } catch (IOException e) {
+         System.err.println("Connection error: " + e.getMessage());
+      } catch (Exception e) {
+         System.err.println("Encryption error: " + e.getMessage());
+      }
+
+   }
+
+   private static void sendGroupMessage(String message) throws Exception {
+      SecretKey aesKey = EncryptionUtils.generateAESKey();
+      String encryptedMessage = EncryptionUtils.encryptMessage(message, aesKey);
+      StringBuilder bundle = new StringBuilder();
+      synchronized(publicKeys) {
+         for(Map.Entry<String, PublicKey> entry : publicKeys.entrySet()) {
+            if (!((String)entry.getKey()).equals(username)) {
+               String encryptedKey = EncryptionUtils.encryptAESKey(aesKey, (PublicKey)entry.getValue());
+               bundle.append((String)entry.getKey()).append(":").append(encryptedKey).append("|");
+            }
+         }
+      }
+
+      out.println(encryptedMessage + " KEYS " + bundle.toString().replaceAll("\\|$", ""));
+      System.out.print("\r\u001b[2K");
+      System.out.println("You: " + message);
+      System.out.print("> ");
+   }
+
+   private static void sendPrivateMessage(String input) throws Exception {
+      String[] parts = input.split(" ", 3);
+      if (parts.length < 3) {
+         System.out.println("[Client] Usage: /msg <username> <message>");
+      } else {
+         String targetName = parts[1];
+         String message = parts[2];
+         PublicKey targetKey = (PublicKey)publicKeys.get(targetName);
+         if (targetKey == null) {
+            System.out.println("[Client] No public key for '" + targetName + "'. Are they online?");
+         } else {
+            SecretKey aesKey = EncryptionUtils.generateAESKey();
+            String encryptedMessage = EncryptionUtils.encryptMessage(message, aesKey);
+            String encryptedKey = EncryptionUtils.encryptAESKey(aesKey, targetKey);
+            out.println("/msg " + targetName + " " + encryptedMessage + " KEY " + encryptedKey);
+            System.out.print("\r\u001b[2K");
+            System.out.println("[PM to " + targetName + "] " + message);
+            System.out.print("> ");
+         }
+      }
+   }
+
+   private static void handleIncoming(String line) {
+      try {
+         System.out.print("\r\u001b[2K");
+         if (line.startsWith("MSG ")) {
+            String payload = line.substring(4);
+            String[] split = payload.split(" KEYS ");
+            if (split.length < 2) {
+               return;
+            }
+
+            String encryptedMessage = split[0];
+            String keySection = split[1];
+
+            String[] var8;
+            for(String entry : var8 = keySection.split("\\|")) {
+               String[] kv = entry.split(":", 2);
+               if (kv.length == 2 && kv[0].equals(username)) {
+                  SecretKey aesKey = EncryptionUtils.decryptAESKey(kv[1], privateKey);
+                  String decrypted = EncryptionUtils.decryptMessage(encryptedMessage, aesKey);
+                  System.out.println(decrypted);
+                  break;
+               }
+            }
+         } else if (line.startsWith("PM ")) {
+            String[] parts = line.split(" ", 3);
+            if (parts.length < 3) {
+               return;
+            }
+
+            String sender = parts[1];
+            String[] msgAndKey = parts[2].split(" KEY ");
+            if (msgAndKey.length < 2) {
+               return;
+            }
+
+            SecretKey aesKey = EncryptionUtils.decryptAESKey(msgAndKey[1], privateKey);
+            String decrypted = EncryptionUtils.decryptMessage(msgAndKey[0], aesKey);
+            System.out.println("[PM from " + sender + "] " + decrypted);
+         } else if (line.startsWith("NEW_KEY ")) {
+            String payload = line.substring(8);
+            String[] kv = payload.split(":", 2);
+            if (kv.length == 2) {
+               publicKeys.put(kv[0], EncryptionUtils.stringToPublicKey(kv[1]));
+            }
+         } else if (line.startsWith("SHOUT ")) {
+            System.out.println("SHOUT FROM " + line.substring(6));
+         } else if (line.startsWith("SERVER ")) {
+            System.out.println("[Server] " + line.substring(7));
+         } else if (line.startsWith("ERROR ")) {
+            System.out.println("[Error] " + line.substring(6));
+         }
+
+         System.out.print("> ");
+      } catch (Exception e) {
+         System.out.println("[Decryption error] " + e.getMessage());
+         System.out.print("> ");
+      }
+
+   }
+}
