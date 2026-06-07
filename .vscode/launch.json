@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "ChatApp Server",
+      "request": "launch",
+      "mainClass": "Server.ChatAppServer",
+      "classPaths": ["${workspaceFolder}/bin"]
+    },
+    {
+      "type": "java",
+      "name": "ChatApp GUI",
+      "request": "launch",
+      "mainClass": "Client.ChatAppGUI",
+      "classPaths": ["${workspaceFolder}/bin"],
+      "vmArgs": "--module-path \"C:\\javafx-sdk-26.0.1\\lib\" --add-modules javafx.controls,javafx.graphics,javafx.controls,javafx.fxml"
+    }
+  ]
+}
