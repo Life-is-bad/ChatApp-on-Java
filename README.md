@@ -275,6 +275,9 @@ This project showcases:
 ---
 
 **Author:** Aza Naiyer
+
 **Project Type:** Educational Secure Chat Application
+
 **Language:** Java
+
 **Encryption:** RSA + AES Hybrid Encryption System 🔐
